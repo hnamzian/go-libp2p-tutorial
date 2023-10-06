@@ -1,9 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/binary"
-	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -11,20 +11,20 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
-	"github.com/multiformats/go-multiaddr"
 )
 
-const protocolID = "/example/1.0.0"
-const discoveryNamespace = "example"
+const (
+	protocolID         = "/example/1.0.0"
+	discoveryNamespace = "example"
+	gossipRoom         = "librum"
+)
 
 func main() {
-	peerAddr := flag.String("peer-address", "", "peer address")
-	flag.Parse()
-
 	ctx := context.Background()
 
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
@@ -48,36 +48,24 @@ func main() {
 		go readCounter(s)
 	})
 
+	gossipSub, err := pubsub.NewGossipSub(ctx, host)
+	if err != nil {
+		panic(err)
+	}
+	topic, err := gossipSub.Join(gossipRoom)
+	if err != nil {
+		panic(err)
+	}
+	subscriber, err := topic.Subscribe()
+	if err != nil {
+		panic(err)
+	}
+
 	// Setup peer discovery.
 	setupDiscovery(ctx, host)
 
-	if *peerAddr != "" {
-		// Parse the multiaddr string.
-		peerMA, err := multiaddr.NewMultiaddr(*peerAddr)
-		if err != nil {
-			panic(err)
-		}
-		peerAddrInfo, err := peer.AddrInfoFromP2pAddr(peerMA)
-		if err != nil {
-			panic(err)
-		}
-
-		// Connect to the node at the given address.
-		if err := host.Connect(ctx, *peerAddrInfo); err != nil {
-			panic(err)
-		}
-		fmt.Println("Connected to", peerAddrInfo.String())
-
-		// Open a stream with the given peer.
-		s, err := host.NewStream(ctx, peerAddrInfo.ID, protocolID)
-		if err != nil {
-			panic(err)
-		}
-
-		// Start the write and read threads.
-		go writeCounter(s)
-		go readCounter(s)
-	}
+	go subscribe(ctx, subscriber, host.ID())
+	go publish(ctx, topic)
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
@@ -114,6 +102,36 @@ func readCounter(s network.Stream) {
 		}
 
 		fmt.Printf("Received %d from %s\n", counter, s.ID())
+	}
+}
+
+func publish(ctx context.Context, topic *pubsub.Topic) {
+	for {
+		scanner := bufio.NewScanner(os.Stdin)
+
+		for scanner.Scan() {
+			fmt.Print("Enter a message to publish: ")
+			msg := scanner.Text()
+
+			if len(msg) != 0 {
+				topic.Publish(ctx, []byte(msg))
+			}
+		}
+	}
+}
+
+func subscribe(ctx context.Context, subscriber *pubsub.Subscription, hostID peer.ID) {
+	for {
+		msg, err := subscriber.Next(ctx)
+		if err != nil {
+			panic(err)
+		}
+
+		if msg.ReceivedFrom == hostID {
+			continue
+		}
+
+		fmt.Printf("Received: %s from %s\n", string(msg.Data), msg.GetFrom().String())
 	}
 }
 
