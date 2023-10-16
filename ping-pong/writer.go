@@ -6,23 +6,21 @@ import (
 )
 
 type Writer interface {
-	Write([]byte) error
+	Write(protocol.ID, []byte) error
 }
 
 type writer struct {
 	s          *Server
 	PeerID     peer.ID
-	ProtocolID protocol.ID
 }
 
-func NewWriter(s *Server, pid peer.ID, protocolID protocol.ID) *writer {
+func NewWriter(s *Server, pid peer.ID) *writer {
 	return &writer{
 		s:          s,
 		PeerID:     pid,
-		ProtocolID: protocolID,
 	}
 }
 
-func (w *writer) Write(msg []byte) error {
-	return w.s.Write(w.PeerID, w.ProtocolID, msg)
+func (w *writer) Write(protocolID protocol.ID, msg []byte) error {
+	return w.s.Write(w.PeerID, protocolID, msg)
 }

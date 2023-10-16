@@ -64,7 +64,7 @@ func (p *PingService) RegisterHandler(protocolID protocol.ID, handler Handler) {
 			From: s.Conn().RemotePeer(),
 			Msg:  msgBytes,
 		}
-		err = handler(p.s.ctx, req, NewWriter(p.s, s.Conn().RemotePeer(), s.Protocol()))
+		err = handler(p.s.ctx, req, NewWriter(p.s, s.Conn().RemotePeer()))
 		if err != nil {
 			fmt.Printf("Error handling ping request: %s\n", err)
 		}
@@ -74,8 +74,8 @@ func (p *PingService) RegisterHandler(protocolID protocol.ID, handler Handler) {
 func (p *PingService) ping(peerID peer.ID, msg PingMessage) {
 	req := PingMessage{Msg: msg.Msg}
 	reqBytes, err := json.Marshal(req)
-	w := NewWriter(p.s, peerID, PingRequestProtocolID)
-	err = w.Write(reqBytes)
+	w := NewWriter(p.s, peerID)
+	err = w.Write(PingRequestProtocolID, reqBytes)
 	if err != nil {
 		fmt.Printf("Error sending ping request: %s\n", err)
 	}

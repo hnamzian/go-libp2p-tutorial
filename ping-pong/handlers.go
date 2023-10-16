@@ -18,7 +18,7 @@ func onPingRequest(ctx context.Context, req ReadMessage, resp Writer) error {
 		fmt.Printf("Error marshaling ping response: %s\n", err)
 		return err
 	}
-	return resp.Write(rspMsgBytes)
+	return resp.Write(PingResponseProtocolID, rspMsgBytes)
 }
 
 func onPingResponse(ctx context.Context, req ReadMessage, resp Writer) error {
