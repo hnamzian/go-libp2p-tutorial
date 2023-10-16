@@ -44,14 +44,8 @@ type (
 		Msg  []byte
 	}
 
-	WriteMessage struct {
-		To         peer.ID
-		ProtocolID string
-		Msg        interface{}
-	}
-
 	ResponseWriter interface {
-		Write([]byte) error
+		Write(peer.ID, protocol.ID, []byte) error
 	}
 
 	PingMessage struct {
@@ -98,31 +92,21 @@ func (p *PingService) RegisterHandler(protocolID protocol.ID, handler Handler) {
 }
 
 func (p *PingService) ping(peerID peer.ID, msg PingMessage) {
-	req := WriteMessage{
-		To:         peerID,
-		ProtocolID: PingRequestProtocolID,
-		Msg:        PingMessage{Msg: msg.Msg},
-	}
+	req := PingMessage{Msg: msg.Msg}
 	reqBytes, err := json.Marshal(req)
-	err = p.Write(reqBytes)
+	err = p.Write(peerID, PingRequestProtocolID, reqBytes)
 	if err != nil {
 		fmt.Printf("Error sending ping request: %s\n", err)
 	}
 }
 
-func (p *PingService) Write(data []byte) error {
-	var req WriteMessage
-	if err := json.Unmarshal(data, &req); err != nil {
-		fmt.Printf("Error unmarshaling ping request: %s\n", err)
-		return err
-	}
-	s, err := p.s.host.NewStream(p.s.ctx, peer.ID(req.To), protocol.ID(req.ProtocolID))
+func (p *PingService) Write(peerID peer.ID, protocolID protocol.ID, data []byte) error {
+	s, err := p.s.host.NewStream(p.s.ctx, peerID, protocolID)
 	if err != nil {
 		fmt.Printf("Error opening stream: %s\n", err)
 		return err
 	}
-	msgBytes, err := json.Marshal(req.Msg)
-	_, err = s.Write(msgBytes)
+	_, err = s.Write(data)
 	if err != nil {
 		err = s.Reset()
 		if err != nil {
@@ -147,17 +131,13 @@ func onPingRequest(ctx context.Context, req ReadMessage, resp ResponseWriter) er
 		fmt.Printf("Error unmarshaling ping message: %s\n", err)
 	}
 	fmt.Printf("-> %s: %s\n", req.From, msg.Msg)
-	rspMsg := WriteMessage{
-		To:         req.From,
-		ProtocolID: PingResponseProtocolID,
-		Msg:        PingMessage{Msg: "pong"},
-	}
+	rspMsg := PingMessage{Msg: "pong"}
 	rspMsgBytes, err := json.Marshal(rspMsg)
 	if err != nil {
 		fmt.Printf("Error marshaling ping response: %s\n", err)
 		return err
 	}
-	return resp.Write(rspMsgBytes)
+	return resp.Write(req.From, PingResponseProtocolID, rspMsgBytes)
 }
 
 func onPingResponse(ctx context.Context, req ReadMessage, resp ResponseWriter) error {
