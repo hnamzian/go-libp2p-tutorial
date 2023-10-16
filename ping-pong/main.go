@@ -12,12 +12,9 @@ import (
 	"syscall"
 
 	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -28,12 +25,7 @@ const (
 )
 
 type (
-	Handler func(ctx context.Context, msg ReadMessage, resp ResponseWriter) error
-
-	Server struct {
-		host host.Host
-		ctx  context.Context
-	}
+	Handler func(ctx context.Context, msg ReadMessage, resp Writer) error
 
 	PingService struct {
 		s *Server
@@ -51,19 +43,7 @@ type (
 	PingMessage struct {
 		Msg string
 	}
-
-	discoveryNotifee struct {
-		s *Server
-	}
 )
-
-func newServer(ctx context.Context, host host.Host) *Server {
-	s := &Server{
-		host: host,
-		ctx:  ctx,
-	}
-	return s
-}
 
 func newPingService(s *Server) *PingService {
 	p := &PingService{
@@ -84,7 +64,7 @@ func (p *PingService) RegisterHandler(protocolID protocol.ID, handler Handler) {
 			From: s.Conn().RemotePeer(),
 			Msg:  msgBytes,
 		}
-		err = handler(p.s.ctx, req, p)
+		err = handler(p.s.ctx, req, NewWriter(p.s, s.Conn().RemotePeer(), s.Protocol()))
 		if err != nil {
 			fmt.Printf("Error handling ping request: %s\n", err)
 		}
@@ -94,76 +74,11 @@ func (p *PingService) RegisterHandler(protocolID protocol.ID, handler Handler) {
 func (p *PingService) ping(peerID peer.ID, msg PingMessage) {
 	req := PingMessage{Msg: msg.Msg}
 	reqBytes, err := json.Marshal(req)
-	err = p.Write(peerID, PingRequestProtocolID, reqBytes)
+	w := NewWriter(p.s, peerID, PingRequestProtocolID)
+	err = w.Write(reqBytes)
 	if err != nil {
 		fmt.Printf("Error sending ping request: %s\n", err)
 	}
-}
-
-func (p *PingService) Write(peerID peer.ID, protocolID protocol.ID, data []byte) error {
-	s, err := p.s.host.NewStream(p.s.ctx, peerID, protocolID)
-	if err != nil {
-		fmt.Printf("Error opening stream: %s\n", err)
-		return err
-	}
-	_, err = s.Write(data)
-	if err != nil {
-		err = s.Reset()
-		if err != nil {
-			fmt.Printf("Error resetting stream: %s\n", err)
-			return err
-		}
-	}
-	err = s.Close()
-	if err != nil {
-		err = s.Reset()
-		if err != nil {
-			fmt.Printf("Error resetting stream: %s\n", err)
-			return err
-		}
-	}
-	return nil
-}
-
-func onPingRequest(ctx context.Context, req ReadMessage, resp ResponseWriter) error {
-	var msg PingMessage
-	if err := json.Unmarshal([]byte(req.Msg), &msg); err != nil {
-		fmt.Printf("Error unmarshaling ping message: %s\n", err)
-	}
-	fmt.Printf("-> %s: %s\n", req.From, msg.Msg)
-	rspMsg := PingMessage{Msg: "pong"}
-	rspMsgBytes, err := json.Marshal(rspMsg)
-	if err != nil {
-		fmt.Printf("Error marshaling ping response: %s\n", err)
-		return err
-	}
-	return resp.Write(req.From, PingResponseProtocolID, rspMsgBytes)
-}
-
-func onPingResponse(ctx context.Context, req ReadMessage, resp ResponseWriter) error {
-	var msg PingMessage
-	if err := json.Unmarshal([]byte(req.Msg), &msg); err != nil {
-		fmt.Printf("Error unmarshaling ping message: %s\n", err)
-	}
-	fmt.Printf("-> %s: %s\n", req.From, msg.Msg)
-	return nil
-}
-
-func (n *discoveryNotifee) HandlePeerFound(peerInfo peer.AddrInfo) {
-	fmt.Println("found peer", peerInfo.String())
-	if err := n.s.host.Connect(n.s.ctx, peerInfo); err != nil {
-		fmt.Println("error adding peer", err)
-	}
-	n.s.host.Peerstore().AddAddr(peerInfo.ID, peerInfo.Addrs[0], peerstore.PermanentAddrTTL)
-}
-
-func setupDiscovery(s *Server) {
-	discoveryService := mdns.NewMdnsService(
-		s.host,
-		DiscoveryNamespace,
-		&discoveryNotifee{s: s},
-	)
-	discoveryService.Start()
 }
 
 func main() {
