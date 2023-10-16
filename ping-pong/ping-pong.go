@@ -28,6 +28,8 @@ const (
 )
 
 type (
+	Handler func(ctx context.Context, msg ReadMessage, resp ResponseWriter) error
+
 	Server struct {
 		host host.Host
 		ctx  context.Context
@@ -35,6 +37,21 @@ type (
 
 	PingService struct {
 		s *Server
+	}
+
+	ReadMessage struct {
+		From peer.ID
+		Msg  []byte
+	}
+
+	WriteMessage struct {
+		To         peer.ID
+		ProtocolID string
+		Msg        interface{}
+	}
+
+	ResponseWriter interface {
+		Write([]byte) error
 	}
 
 	PingMessage struct {
@@ -58,53 +75,53 @@ func newPingService(s *Server) *PingService {
 	p := &PingService{
 		s: s,
 	}
-	p.s.host.SetStreamHandler(PingRequestProtocolID, p.onPingRequest)
-	p.s.host.SetStreamHandler(PingResponseProtocolID, p.onPingResponse)
+	p.RegisterHandler(PingRequestProtocolID, onPingRequest)
+	p.RegisterHandler(PingResponseProtocolID, onPingResponse)
 	return p
 }
 
-func (p *PingService) onPingRequest(s network.Stream) {
-	msgBytes, err := io.ReadAll(s)
-	if err != nil {
-		fmt.Printf("Error reading ping request: %s\n", err)
-	}
-	var msg PingMessage
-	if err := json.Unmarshal(msgBytes, &msg); err != nil {
-		fmt.Printf("Error unmarshaling ping request: %s\n", err)
-	}
-	fmt.Printf("-> %s: %s\n", s.Conn().RemotePeer().String(), msg.Msg)
-	err = p.sendMessage(p.s.ctx, s.Conn().RemotePeer(), PingResponseProtocolID, PingMessage{Msg: "pong"})
-	if err != nil {
-		fmt.Printf("Error sending ping response: %s\n", err)
-	}
-}
-
-func (p *PingService) onPingResponse(s network.Stream) {
-	msgBytes, err := io.ReadAll(s)
-	if err != nil {
-		fmt.Printf("Error reading ping response: %s\n", err)
-	}
-	var msg PingMessage
-	if err := json.Unmarshal(msgBytes, &msg); err != nil {
-		fmt.Printf("Error unmarshaling ping response: %s\n", err)
-	}
-	fmt.Printf("<- %s: %s\n", s.Conn().RemotePeer().String(), msg.Msg)
+func (p *PingService) RegisterHandler(protocolID protocol.ID, handler Handler) {
+	p.s.host.SetStreamHandler(protocolID, func(s network.Stream) {
+		msgBytes, err := io.ReadAll(s)
+		if err != nil {
+			fmt.Printf("Error reading ping request: %s\n", err)
+		}
+		req := ReadMessage{
+			From: s.Conn().RemotePeer(),
+			Msg:  msgBytes,
+		}
+		err = handler(p.s.ctx, req, p)
+		if err != nil {
+			fmt.Printf("Error handling ping request: %s\n", err)
+		}
+	})
 }
 
 func (p *PingService) ping(peerID peer.ID, msg PingMessage) {
-	err := p.sendMessage(p.s.ctx, peerID, PingRequestProtocolID, msg)
+	req := WriteMessage{
+		To:         peerID,
+		ProtocolID: PingRequestProtocolID,
+		Msg:        PingMessage{Msg: msg.Msg},
+	}
+	reqBytes, err := json.Marshal(req)
+	err = p.Write(reqBytes)
 	if err != nil {
 		fmt.Printf("Error sending ping request: %s\n", err)
 	}
 }
 
-func (p *PingService) sendMessage(ctx context.Context, peerID peer.ID, protocolID protocol.ID, msg PingMessage) error {
-	s, err := p.s.host.NewStream(ctx, peerID, protocolID)
+func (p *PingService) Write(data []byte) error {
+	var req WriteMessage
+	if err := json.Unmarshal(data, &req); err != nil {
+		fmt.Printf("Error unmarshaling ping request: %s\n", err)
+		return err
+	}
+	s, err := p.s.host.NewStream(p.s.ctx, peer.ID(req.To), protocol.ID(req.ProtocolID))
 	if err != nil {
 		fmt.Printf("Error opening stream: %s\n", err)
 		return err
 	}
-	msgBytes, err := json.Marshal(msg)
+	msgBytes, err := json.Marshal(req.Msg)
 	_, err = s.Write(msgBytes)
 	if err != nil {
 		err = s.Reset()
@@ -121,6 +138,34 @@ func (p *PingService) sendMessage(ctx context.Context, peerID peer.ID, protocolI
 			return err
 		}
 	}
+	return nil
+}
+
+func onPingRequest(ctx context.Context, req ReadMessage, resp ResponseWriter) error {
+	var msg PingMessage
+	if err := json.Unmarshal([]byte(req.Msg), &msg); err != nil {
+		fmt.Printf("Error unmarshaling ping message: %s\n", err)
+	}
+	fmt.Printf("-> %s: %s\n", req.From, msg.Msg)
+	rspMsg := WriteMessage{
+		To:         req.From,
+		ProtocolID: PingResponseProtocolID,
+		Msg:        PingMessage{Msg: "pong"},
+	}
+	rspMsgBytes, err := json.Marshal(rspMsg)
+	if err != nil {
+		fmt.Printf("Error marshaling ping response: %s\n", err)
+		return err
+	}
+	return resp.Write(rspMsgBytes)
+}
+
+func onPingResponse(ctx context.Context, req ReadMessage, resp ResponseWriter) error {
+	var msg PingMessage
+	if err := json.Unmarshal([]byte(req.Msg), &msg); err != nil {
+		fmt.Printf("Error unmarshaling ping message: %s\n", err)
+	}
+	fmt.Printf("-> %s: %s\n", req.From, msg.Msg)
 	return nil
 }
 
