@@ -6,6 +6,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
 )
 
 const (
@@ -13,60 +14,48 @@ const (
 )
 
 type (
-	// mapping from Sender->Recipient->ReadWriter
 	ReadWriters map[peer.ID]*bufio.ReadWriter
 
 	BroadcastService struct {
-		s               *Server
-		downReadWriters ReadWriters
-		upReadWriters   ReadWriters
+		s        *Server
+		channels BroadcastChannels
 	}
 )
 
 func NewBroadcastService(s *Server) *BroadcastService {
 	b := &BroadcastService{
-		s:               s,
+		s:        s,
+		channels: make(BroadcastChannels, 0),
+	}
+	return b
+}
+
+func (b *BroadcastService) AddChannel(protocolID protocol.ID) {
+	b.channels[protocolID] = &BroadcastChannel{
 		downReadWriters: make(ReadWriters, 0),
 		upReadWriters:   make(ReadWriters, 0),
 	}
 	b.s.host.SetStreamHandler(BroadcastProtocolID, b.OnBroadcast)
-	return b
 }
 
-func (b *BroadcastService) ReadWriters() (*ReadWriters, *ReadWriters) {
+func (b *BroadcastService) ReadWriters(protocolID protocol.ID) (*BroadcastChannel) {
 	// prune RWs for peers that are no longer connected
-	for peerID, rw := range b.upReadWriters {
+	for peerID, rw := range b.channels[protocolID].upReadWriters {
 		if b.s.host.Network().Connectedness(peerID) != network.Connected {
 			fmt.Printf("Removing RW for %s\n", peerID)
-			delete(b.upReadWriters, peerID)
+			b.channels.RemoveStream(peerID, protocolID)
 			rw.Flush()
 			rw.Reader.Reset(nil)
 			rw.Writer.Reset(nil)
 		}
 	}
-
-	// add RWs for peers that are connected but don't have one yet
-	for _, peerID := range b.s.host.Peerstore().Peers() {
-		if peerID == b.s.host.ID() {
-			continue
-		}
-		if _, ok := b.upReadWriters[peerID]; !ok {
-			rw, err := b.s.newReadWriter(peerID, BroadcastProtocolID)
-			if err != nil {
-				continue
-			}
-			b.upReadWriters[peerID] = rw
-			go readData(rw)
-		}
-	}
-
-	return &b.downReadWriters, &b.upReadWriters
+	return b.channels[protocolID]
 }
 
-func (b *BroadcastService) BroadcastMessage(msg []byte) error {
-	inpRWs, outRWs := b.ReadWriters()
+func (b *BroadcastService) BroadcastMessage(protocolID protocol.ID, msg []byte) error {
+	bc := b.ReadWriters(protocolID)
 
-	for _, rw := range *inpRWs {
+	for _, rw := range bc.downReadWriters {
 		_, err := rw.Write(msg)
 		if err != nil {
 			fmt.Printf("Error writing to %s: %s\n", rw, err)
@@ -77,7 +66,7 @@ func (b *BroadcastService) BroadcastMessage(msg []byte) error {
 			return err
 		}
 	}
-	for _, rw := range *outRWs {
+	for _, rw := range bc.upReadWriters {
 		_, err := rw.Write(msg)
 		if err != nil {
 			fmt.Printf("Error writing to %s: %s\n", rw, err)
@@ -108,8 +97,7 @@ func readData(rw *bufio.ReadWriter) {
 func (b *BroadcastService) OnBroadcast(s network.Stream) {
 	fmt.Printf("Received broadcast from %s\n", s.Conn().RemotePeer().String())
 	rw := bufio.NewReadWriter(bufio.NewReader(s), bufio.NewWriter(s))
-	b.downReadWriters[s.Conn().RemotePeer()] = rw
-	// go readData(rw)
+	b.channels.AddDownstream(s.Conn().RemotePeer(), s.Protocol(), rw)
 }
 
 func (b *BroadcastService) OnPeerFound(peerInfo peer.AddrInfo) {
@@ -118,6 +106,6 @@ func (b *BroadcastService) OnPeerFound(peerInfo peer.AddrInfo) {
 		fmt.Printf("Error creating readwriter for %s: %s\n", peerInfo.ID, err)
 		return
 	}
-	b.upReadWriters[peerInfo.ID] = rw
+	b.channels.AddUpstream(peerInfo.ID, BroadcastProtocolID, rw)
 	go readData(rw)
 }

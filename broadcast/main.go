@@ -27,6 +27,7 @@ func main() {
 	defer host.Close()
 
 	bs := NewBroadcastService(server)
+	bs.AddChannel(BroadcastProtocolID)
 
 	discovery := NewDiscovery(server)
 	discovery.RegisterHandler(bs.OnPeerFound)
@@ -46,7 +47,7 @@ func main() {
 				}
 			}
 			fmt.Printf("broadcasting to peers: %s\n", strings.Trim(input, "\n"))
-			go bs.BroadcastMessage([]byte(input))
+			go bs.BroadcastMessage(BroadcastProtocolID, []byte(input))
 		}
 	})
 	errGroup.Go(func() error {
