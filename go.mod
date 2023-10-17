@@ -38,6 +38,7 @@ require (
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
 	github.com/libp2p/go-libp2p v0.31.0 // indirect
 	github.com/libp2p/go-libp2p-asn-util v0.3.0 // indirect
+	github.com/libp2p/go-libp2p-crypto v0.1.0
 	github.com/libp2p/go-libp2p-discovery v0.7.0 // indirect
 	github.com/libp2p/go-libp2p-pubsub v0.9.3
 	github.com/libp2p/go-msgio v0.3.0 // indirect
