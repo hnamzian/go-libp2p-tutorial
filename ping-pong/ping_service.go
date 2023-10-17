@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
@@ -14,7 +14,6 @@ import (
 const (
 	PingRequestProtocolID  = "/ping/req/1.0.0"
 	PingResponseProtocolID = "/ping/rsp/1.0.0"
-	DiscoveryNamespace     = "ping"
 )
 
 type (

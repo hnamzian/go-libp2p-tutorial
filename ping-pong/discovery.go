@@ -8,6 +8,8 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 )
 
+const DiscoveryNamespace = "ping"
+
 type discoveryNotifee struct {
 	s *Server
 }
